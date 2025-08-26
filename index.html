@@ -50,7 +50,7 @@
     const p = new URLSearchParams(location.search);
     const office  = p.get("office") || "mead-office";
     const perPage = Math.max(1, parseInt(p.get("per")||"2",10));
-    const rotateS = Math.max(5, parseInt(p.get("rotate")||"20",10));
+    const rotateS = Math.max(5, parseInt(p.get("rotate")||"10",10));
     const mode    = (p.get("mode") || "compact").toLowerCase();
     const cardMin = parseInt(p.get("cardmin")||"0",10);
     const anim    = (p.get("anim")||"on").toLowerCase() !== "off";
