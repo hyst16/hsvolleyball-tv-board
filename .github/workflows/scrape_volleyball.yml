@@ -1,0 +1,44 @@
+name: scrape(volleyball)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 12 * * *"   # daily 12:15 UTC (~morning CT)
+  push:
+    paths:
+      - "scraper/**"
+      - ".github/workflows/scrape_volleyball.yml"
+      - "requirements.txt"
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run scraper
+        run: |
+          python scraper/scrape_nsaa_volleyball.py
+          test -f data/volleyball.json
+
+      - name: Commit if changed
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data/volleyball.json
+            git commit -m "chore(volleyball): update volleyball.json ($(date -u +'%Y-%m-%d %H:%M:%SZ'))"
+            git push
+          else
+            echo "No changes to commit."
+          fi
