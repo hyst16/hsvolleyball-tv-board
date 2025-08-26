@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, time, re, os, sys
+import json, time, re, sys
 from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
@@ -24,48 +24,47 @@ def fetch(url: str) -> str:
     r.raise_for_status()
     return r.text
 
+def _cells(tr):
+    # collect text from th or td; NSAA often uses <td> for header row
+    return [c.get_text(" ", strip=True) for c in tr.find_all(["th", "td"])]
+
 def parse_class_page(html: str, cls_code: str):
     soup = BeautifulSoup(html, "lxml")
     by_team = {}
 
-    # Each team table has a caption like "Arlington (1-2)"
+    # Each team table has a <caption><b>Team (x-y)</b></caption>
     for cap in soup.find_all("caption"):
         team_display = cap.get_text(strip=True)
-        # Parent table contains rows
         table = cap.find_parent("table")
-        if not table: continue
+        if not table:
+            continue
 
         team_name = re.sub(r"\s*\([\d\-]+\)\s*$", "", team_display).strip()
         key = norm(team_name)
 
-        rows = []
-        # header row then hr then data rows
-        for tr in table.find_all("tr"):
-            tds = [td.get_text(" ", strip=True) for td in tr.find_all(["td","th"])]
-            if not tds: continue
-            # detect schedule rows by having Date + Opponent somewhere
-            # NSAA columns we care about:
-            # Date, Opponent, Class, W-L, Div, W/L, Score, Points, Tournament Name, Tournament Location
-            if len(tds) >= 3:
-                # Build a dict by column names found in header row
-                # We’ll map by position (site sometimes exists; that’s ok)
-                # Create name->index map from the header row when we see "Date" in it.
-                pass
-
-        # Better: find the header row first
+        # ---- locate the header row (could be <td> or <th>)
         headers = []
+        header_tr = None
         for tr in table.find_all("tr"):
-            headers = [th.get_text(" ", strip=True) for th in tr.find_all("th")]
-            if headers and "Date" in headers and "Opponent" in headers:
+            cells = _cells(tr)
+            if not cells:
+                continue
+            # normalize plural header to singular for our field map
+            cells_norm = [c.replace("Opponents", "Opponent") for c in cells]
+            if "Date" in cells_norm and "Opponent" in cells_norm:
+                headers = cells_norm
                 header_tr = tr
                 break
-        if not headers:
+        if not headers or not header_tr:
+            # no usable header -> skip this table
             continue
 
-        # indices
+        # column index helper
         def idx(col):
-            try: return headers.index(col)
-            except ValueError: return None
+            try:
+                return headers.index(col)
+            except ValueError:
+                return None
 
         i_date  = idx("Date")
         i_opp   = idx("Opponent")
@@ -81,18 +80,21 @@ def parse_class_page(html: str, cls_code: str):
         i_ha    = idx("Home/Away")
         i_div   = idx("Div")
 
-        # iterate following rows until next caption/table ends
-        iter_tr = header_tr.find_next_siblings("tr")
-        for tr in iter_tr:
-            # stop if we hit a row that contains only a caption/hr line of totals
-            if tr.find("caption"): break
+        rows = []
+        for tr in header_tr.find_next_siblings("tr"):
             tds = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
-            if not tds: continue
-            # some rows are the HR separator row
-            if len(tds)==1 and "Total Points" in tds[0]:
-                break
+            if not tds:
+                continue
 
-            def val(i): return tds[i] if i is not None and i < len(tds) else None
+            # stop when we hit the totals block
+            if any(("Total Points" in x) or ("Average Points" in x) or ("Win %" in x) for x in tds):
+                break
+            # skip the HR separator row: often a single TD with <hr>
+            if len(tds) == 1 and ("hr" in tds[0].lower() or tds[0] == "-"):
+                continue
+
+            def val(i):
+                return tds[i] if i is not None and i < len(tds) else None
 
             row = {}
             if i_date is not None:  row["Date"] = val(i_date)
@@ -114,7 +116,7 @@ def parse_class_page(html: str, cls_code: str):
             row["_team_display"] = team_display
             row["_class"] = (row.get("Class") or cls_code)
 
-            # skip blank separators
+            # skip blank-ish rows
             if not any(v and v != "-" for v in row.values()):
                 continue
 
@@ -130,16 +132,14 @@ def main():
     for cls, url in CLASS_URLS.items():
         try:
             html = fetch(url)
-            data = parse_class_page(html, cls)
-            all_by_team.update(data)
+            got = parse_class_page(html, cls)
+            all_by_team.update(got)
         except Exception as e:
             print(f"[WARN] {cls} failed: {e}", file=sys.stderr)
 
-    out = {
-        "updated": int(time.time()),
-        "by_team": all_by_team
-    }
-    OUT.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    OUT.write_text(json.dumps({"updated": int(time.time()), "by_team": all_by_team},
+                              ensure_ascii=False),
+                   encoding="utf-8")
     print(f"Wrote {OUT.resolve()}")
 
 if __name__ == "__main__":
