@@ -13,22 +13,15 @@ https://hyst16.github.io/hsvolleyball-tv-board/?office=<office-key>
 
 Example (clickable):
 
-- [Mead TV — mead-office](https://hyst16.github.io/hsvolleyball-tv-board/?office=mead-office)
+- [Yanka TV — yanka-office](https://hyst16.github.io/hsvolleyball-tv-board/?office=yanka-office)
 
 Office URL mappings and teams
 
 Below is the current list of office keys and the teams they contain. These are updated from `teams.json`.
 
 <!-- offices-start -->
-
 ## Office URL mappings
-
 Use the links to open each office directly:
-
-- [mead-office](https://hyst16.github.io/hsvolleyball-tv-board/?office=mead-office)
-  - Aquinas Catholic
-  - David City
-  - East Butler
 
 - [northbend-office](https://hyst16.github.io/hsvolleyball-tv-board/?office=northbend-office)
   - North Bend Central
@@ -43,6 +36,11 @@ Use the links to open each office directly:
   - Humphrey-Lindsay
   - Archangels Catholic
   - Twin River
+
+- [yanka-office](https://hyst16.github.io/hsvolleyball-tv-board/?office=yanka-office)
+  - Aquinas Catholic
+  - David City
+  - East Butler
 
 <!-- offices-end -->
 
