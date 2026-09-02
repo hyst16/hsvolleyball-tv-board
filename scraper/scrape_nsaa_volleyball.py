@@ -1,146 +1,150 @@
-#!/usr/bin/env python3
-import json, time, re, sys
+import csv
+import json
+import re
+import time
+from datetime import datetime
+from io import StringIO
 from pathlib import Path
+
 import requests
-from bs4 import BeautifulSoup
 
-OUT = Path("data/volleyball.json")
-OUT.parent.mkdir(parents=True, exist_ok=True)
+YEAR = 2026
 
-CLASS_URLS = {
-    "A":  "https://nsaa-static.s3.amazonaws.com/calculate/showclassvbA.html",
-    "B":  "https://nsaa-static.s3.amazonaws.com/calculate/showclassvbB.html",
-    "C1": "https://nsaa-static.s3.amazonaws.com/calculate/showclassvbC1.html",
-    "C2": "https://nsaa-static.s3.amazonaws.com/calculate/showclassvbC2.html",
-    "D1": "https://nsaa-static.s3.amazonaws.com/calculate/showclassvbD1.html",
-    "D2": "https://nsaa-static.s3.amazonaws.com/calculate/showclassvbD2.html",
-}
+CLASSES = [
+    "A",
+    "B",
+    "C1",
+    "C2",
+    "D1",
+    "D2",
+]
 
-def norm(s: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+BASE_URL = (
+    "https://secure.nsaahome.org/"
+    "wildcards/schedules/export.php"
+)
 
-def fetch(url: str) -> str:
-    r = requests.get(url, timeout=30)
-    r.raise_for_status()
-    return r.text
+OUTFILE = Path("data/volleyball.json")
 
-def _cells(tr):
-    # collect text from th or td; NSAA often uses <td> for header row
-    return [c.get_text(" ", strip=True) for c in tr.find_all(["th", "td"])]
 
-def parse_class_page(html: str, cls_code: str):
-    soup = BeautifulSoup(html, "lxml")
-    by_team = {}
+def normalize_team(name):
+    return re.sub(r"[^a-z0-9]+", "", name.lower())
 
-    # Each team table has a <caption><b>Team (x-y)</b></caption>
-    for cap in soup.find_all("caption"):
-        team_display = cap.get_text(strip=True)
-        table = cap.find_parent("table")
-        if not table:
-            continue
 
-        team_name = re.sub(r"\s*\([\d\-]+\)\s*$", "", team_display).strip()
-        key = norm(team_name)
+def convert_date(value):
+    value = value.strip()
 
-        # ---- locate the header row (could be <td> or <th>)
-        headers = []
-        header_tr = None
-        for tr in table.find_all("tr"):
-            cells = _cells(tr)
-            if not cells:
-                continue
-            # normalize plural header to singular for our field map
-            cells_norm = [c.replace("Opponents", "Opponent") for c in cells]
-            if "Date" in cells_norm and "Opponent" in cells_norm:
-                headers = cells_norm
-                header_tr = tr
-                break
-        if not headers or not header_tr:
-            # no usable header -> skip this table
-            continue
+    try:
+        dt = datetime.strptime(value, "%a %d %b")
+        dt = dt.replace(year=YEAR)
+        return dt.strftime("%m/%d/%y")
+    except Exception:
+        return value
 
-        # column index helper
-        def idx(col):
-            try:
-                return headers.index(col)
-            except ValueError:
-                return None
 
-        i_date  = idx("Date")
-        i_opp   = idx("Opponent")
-        i_cls   = idx("Class")
-        i_wlopp = idx("W-L")
-        i_wl    = idx("W/L")
-        i_score = idx("Score")
-        i_pts   = idx("Points")
-        i_tn    = idx("Tournament Name")
-        i_tloc  = idx("Tournament Location")
-        i_site  = idx("Site")
-        i_time  = idx("Time")
-        i_ha    = idx("Home/Away")
-        i_div   = idx("Div")
+def parse_result(score):
+    if not score:
+        return "", "-"
 
-        rows = []
-        for tr in header_tr.find_next_siblings("tr"):
-            tds = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
-            if not tds:
-                continue
+    score = (
+        score.replace("&ndash;", "-")
+        .replace("–", "-")
+        .strip()
+    )
 
-            # stop when we hit the totals block
-            if any(("Total Points" in x) or ("Average Points" in x) or ("Win %" in x) for x in tds):
-                break
-            # skip the HR separator row: often a single TD with <hr>
-            if len(tds) == 1 and ("hr" in tds[0].lower() or tds[0] == "-"):
-                continue
+    m = re.match(r"(\d+)-(\d+)", score)
 
-            def val(i):
-                return tds[i] if i is not None and i < len(tds) else None
+    if not m:
+        return "", score
 
-            row = {}
-            if i_date is not None:  row["Date"] = val(i_date)
-            if i_opp  is not None:  row["Opponent"] = val(i_opp)
-            if i_cls  is not None:  row["Class"] = val(i_cls)
-            if i_wlopp is not None: row["W-L"] = val(i_wlopp)
-            if i_wl   is not None:  row["W/L"] = val(i_wl)
-            if i_score is not None: row["Score"] = val(i_score)
-            if i_pts  is not None:  row["Points"] = val(i_pts)
-            if i_tn   is not None:  row["Tournament Name"] = val(i_tn)
-            if i_tloc is not None:  row["Tournament Location"] = val(i_tloc)
-            if i_site is not None:  row["Site"] = val(i_site)
-            if i_time is not None:  row["Time"] = val(i_time)
-            if i_ha   is not None:  row["Home/Away"] = val(i_ha)
-            if i_div  is not None:  row["Div"] = val(i_div)
+    left = int(m.group(1))
+    right = int(m.group(2))
 
-            # attach helpers the UI expects
-            row["_team"] = team_name
-            row["_team_display"] = team_display
-            row["_class"] = (row.get("Class") or cls_code)
+    if left > right:
+        return "W", score
 
-            # skip blank-ish rows
-            if not any(v and v != "-" for v in row.values()):
-                continue
+    if left < right:
+        return "L", score
 
-            rows.append(row)
+    return "T", score
 
-        if rows:
-            by_team[key] = rows
 
-    return by_team
+def download_class(class_name):
+    response = requests.get(
+        BASE_URL,
+        params={
+            "sport": "vb",
+            "class": class_name
+        },
+        timeout=60
+    )
+
+    response.raise_for_status()
+
+    return response.text
+
 
 def main():
-    all_by_team = {}
-    for cls, url in CLASS_URLS.items():
-        try:
-            html = fetch(url)
-            got = parse_class_page(html, cls)
-            all_by_team.update(got)
-        except Exception as e:
-            print(f"[WARN] {cls} failed: {e}", file=sys.stderr)
+    by_team = {}
 
-    OUT.write_text(json.dumps({"updated": int(time.time()), "by_team": all_by_team},
-                              ensure_ascii=False),
-                   encoding="utf-8")
-    print(f"Wrote {OUT.resolve()}")
+    for class_name in CLASSES:
+        print(f"Downloading class {class_name}")
+
+        csv_text = download_class(class_name)
+
+        reader = csv.DictReader(StringIO(csv_text))
+
+        for row in reader:
+
+            school = row.get("School", "").strip()
+
+            if not school:
+                continue
+
+            key = normalize_team(school)
+
+            score = row.get("Score", "").strip()
+
+            wl, score = parse_result(score)
+
+            wins = row.get("Wins", "").strip()
+            losses = row.get("Losses", "").strip()
+
+            record = "-"
+
+            if wins and losses:
+                record = f"{wins}-{losses}"
+
+            game = {
+                "Date": convert_date(row["Date"]),
+                "Opponent": row["Opponent"].strip(),
+                "Class": row["Class"].strip(),
+                "W-L": record,
+                "Div": row["Division"].strip() or "-",
+                "W/L": wl,
+                "Score": score or "-",
+                "_team": school,
+                "_team_display": school,
+                "_class": class_name,
+            }
+
+            by_team.setdefault(key, []).append(game)
+
+    payload = {
+        "updated": int(time.time()),
+        "by_team": by_team,
+    }
+
+    OUTFILE.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(OUTFILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, separators=(",", ":"))
+
+    print(
+        f"Wrote volleyball.json for "
+        f"{len(by_team)} teams"
+    )
+
 
 if __name__ == "__main__":
     main()
