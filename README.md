@@ -29,6 +29,12 @@ Use the links to open each office directly:
   - Logan View/Scribner-Snyder
   - Schuyler
 
+- [prague-office](https://hyst16.github.io/hsvolleyball-tv-board/?office=prague-office)
+  - East Butler
+  - North Bend Central
+  - Bishop Neumann
+  - Wahoo
+
 - [tarnov-office](https://hyst16.github.io/hsvolleyball-tv-board/?office=tarnov-office)
   - Columbus
   - Columbus Lakeview
